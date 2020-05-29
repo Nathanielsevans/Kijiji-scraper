@@ -2,17 +2,31 @@ import requests
 from bs4 import BeautifulSoup
 import sys
 import json
+from twilio.rest import Client
+import os
+from datetime import datetime
 
 
 # Base URL to perform Kijiji webscraping on - provide the URL from the first page (not any of the numbered pages)
 URL = "https://www.kijiji.ca/b-bikes/ottawa/bike/k0c644l1700185?radius=104.0&gpTopAds=y&address=Ottawa%2C+ON&ll=45.421530,-75.697193"
-# List of bike companies to do a keyword search for - case doesn't matter.
+
+# List of bike companies to do a keyword search for - NOTE: keep it lowercase.
 BIKE_LIST = [
     "specialized",
     "giant", 
     "cervelo"
 ]
+
 OLD_LISTINGS = dict() # Store of all the listings that we have already be notified about
+
+# Twilio API credentials
+ACCOUNT_SID = os.environ.get('KIJIJI_TWILIO_ACCOUNT_SID')
+AUTH_TOKEN = os.environ.get('KIJIJI_TWILIO_AUTH_TOKEN')
+HOST_NUMBER = os.environ.get('KIJIJI_TWILIO_NUMBER')
+NUMBERS = [
+	"+16138831157",
+	"+16138644591"
+]
 
 # Helper functions
 
@@ -78,6 +92,47 @@ def parse_site(site_content):
         else:
             index += 1
 
+
+def send_text(number, message):
+	"""
+	param: number <str> : This is the outbound verified Twilio number that the message will be sent to.
+	param: message <str> : This is the message to send to the Twilio number from above.
+	"""
+	client = Client(ACCOUNT_SID, AUTH_TOKEN)
+
+	message = client.messages \
+                .create(
+                     body=message,
+                     from_=HOST_NUMBER,
+                     to=number
+                 )
+
+	return
+
+def listing_notifier(index, content):
+    """
+    """
+
+    # Loop through the listings and find title match to the bike models specified above
+    for listing in range(index, len(content)):
+        listing_title = content[listing].getText().strip()
+        listing_href = content[listing]['href'].strip()
+
+        if any(word in listing_title.lower() for word in BIKE_LIST) and listing_title not in OLD_LISTINGS.keys():
+            print('POSITIVE: ', listing_title)
+            for number in NUMBERS:
+                send_text(number, "The following listing: {}, seems interesting. Link: {}".format(listing_title, listing_href))
+            
+            # Store the listing information with Title, URL and Date metadata
+            OLD_LISTINGS[listing_title] = {
+                "URL": listing_href,
+                "Date": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+            }
+        else:
+            continue
+
+    return
+
     
 def main():
     """
@@ -91,7 +146,13 @@ def main():
     # Parse contents of the site
     start_ind, content = parse_site(data)
 
-    #NOTE: Left off here after finding the first index with a listing on kijiji.
+    # Loop through the listings and find title match to the bike models specified above
+    listing_notifier(start_ind, content)
+
+    # Write contents of processed listings to file as backup
+    listing_IO(True)
+    
+
 
 main()
 
